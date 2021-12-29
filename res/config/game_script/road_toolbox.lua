@@ -460,7 +460,63 @@ local buildParallel = function(newSegments)
     end
     local build = api.cmd.make.buildProposal(proposal, nil, false)
     api.cmd.sendCommand(build, function(x) end)
+end
 
+-- local 
+function handleStreetBuilderApply(proposal)
+	if
+		state.use == 2
+		and proposal.addedSegments
+		and proposal.new2oldSegments
+		and proposal.removedSegments
+		and #proposal.addedSegments > 0
+		and #proposal.new2oldSegments == 0
+		and #proposal.removedSegments == 0
+	then
+		local newSegments = {}
+		for i = 1, #proposal.addedSegments do
+			local seg = proposal.addedSegments[i]
+			if seg.type == 0 then
+				table.insert(newSegments, seg.entity)
+			end
+		end
+		
+		if #newSegments > 0 then
+			game.interface.sendScriptEvent("__roadtoolbox__", "parallel", {newSegments = newSegments})
+		end
+	elseif
+		state.use == 1 
+		-- and	proposal.addedSegments 
+		and #proposal.addedSegments > 0
+		-- and proposal.removedSegments 
+		and #proposal.addedSegments > #proposal.removedSegments  -- why?
+	then
+		local newSegments = {}
+		local nodes = {}
+		local map = api.engine.system.streetSystem.getNode2StreetEdgeMap()  -- existing nodes/edges
+		for i = 1, #proposal.addedSegments do
+			local seg = proposal.addedSegments[i]
+			if not proposal.new2oldSegments[seg.entity] then
+				table.insert(newSegments, seg.entity)
+				if not nodes[seg.comp.node0] then nodes[seg.comp.node0] = {} end
+				if not nodes[seg.comp.node1] then nodes[seg.comp.node1] = {} end
+				table.insert(nodes[seg.comp.node0], seg.entity)
+				table.insert(nodes[seg.comp.node1], seg.entity)
+			end
+		end
+		
+		local extNodes = {}
+		
+		for node, edges in pairs(nodes) do
+			if #edges == 1 then
+				table.insert(extNodes, {node = node, isConnected = #edges < #map[node]})  -- needs positive ids !!
+			end
+		end
+		
+		if (#extNodes == 2 and #func.filter(extNodes, pipe.select("isConnected")) > 0) then
+			game.interface.sendScriptEvent("__roadtoolbox__", "sharp", {newSegments = newSegments, nodes = extNodes})
+		end
+	end
 end
 
 local script = {
@@ -468,7 +524,7 @@ local script = {
         -- dbg.start("127.0.0.1", 8818)
         if (id == "__edgeTool__" and param.sender ~= "stb") then
             if (name == "off") then
-                if (param.sender ~= "autosig2" or param.sender ~= "ptracks") then
+                if (param.sender ~= "autosig2" or param.sender ~= "ptracks") then  -- always true?
                     state.use = false
                 end
             end
@@ -483,6 +539,10 @@ local script = {
                 buildSharp(param.newSegments, param.nodes)
             elseif (name == "parallel") then
                 buildParallel(param.newSegments)
+			elseif (name == "build_sharp_external") then  -- param: param.proposal.proposal; needs positive ids !!
+				print("Ex",param)
+				p=param
+				-- handleStreetBuilderApply(param)
             end
         end
     end,
@@ -500,62 +560,11 @@ local script = {
         for _, fn in ipairs(state.fn) do fn() end
         state.fn = {}
     end,
-    guiHandleEvent = function(source, name, param)
-        if source == "streetBuilder" then
+    guiHandleEvent = function(id, name, param)
+        if id == "streetBuilder" then
             createWindow()
-            if name == "builder.apply" then
-                local proposal = param.proposal.proposal
-                if
-                    state.use == 2
-                    and proposal.addedSegments
-                    and proposal.new2oldSegments
-                    and proposal.removedSegments
-                    and #proposal.addedSegments > 0
-                    and #proposal.new2oldSegments == 0
-                    and #proposal.removedSegments == 0
-                then
-                    local newSegments = {}
-                    for i = 1, #proposal.addedSegments do
-                        local seg = proposal.addedSegments[i]
-                        if seg.type == 0 then
-                            table.insert(newSegments, seg.entity)
-                        end
-                    end
-                    
-                    if #newSegments > 0 then
-                        game.interface.sendScriptEvent("__roadtoolbox__", "parallel", {newSegments = newSegments})
-                    end
-                elseif
-                    state.use == 1 and
-                    proposal.addedSegments and #proposal.addedSegments > 0
-                    and proposal.removedSegments and #proposal.addedSegments > #proposal.removedSegments
-                then
-                    local newSegments = {}
-                    local nodes = {}
-                    local map = api.engine.system.streetSystem.getNode2StreetEdgeMap()
-                    for i = 1, #proposal.addedSegments do
-                        local seg = proposal.addedSegments[i]
-                        if not proposal.new2oldSegments[seg.entity] then
-                            table.insert(newSegments, seg.entity)
-                            if not nodes[seg.comp.node0] then nodes[seg.comp.node0] = {} end
-                            if not nodes[seg.comp.node1] then nodes[seg.comp.node1] = {} end
-                            table.insert(nodes[seg.comp.node0], seg.entity)
-                            table.insert(nodes[seg.comp.node1], seg.entity)
-                        end
-                    end
-                    
-                    local extNodes = {}
-                    
-                    for node, edges in pairs(nodes) do
-                        if #edges == 1 then
-                            table.insert(extNodes, {node = node, isConnected = #edges < #map[node]})
-                        end
-                    end
-                    
-                    if (#extNodes == 2 and #func.filter(extNodes, pipe.select("isConnected")) > 0) then
-                        game.interface.sendScriptEvent("__roadtoolbox__", "sharp", {newSegments = newSegments, nodes = extNodes})
-                    end
-                end
+            if name == "builder.apply" then  -- proposal contains positve/existing ids
+                handleStreetBuilderApply(param.proposal.proposal)
             end
         end
     end
